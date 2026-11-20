@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 from bs4.exceptions import ParserRejectedMarkup
 import time
 import sqlite3
-import os
+import re
 
 url = "https://github.com/orgs/google/repositories"
 
@@ -35,20 +35,17 @@ def convert_stars(star_text):
     else:
         return int(float(star_text))
 
-while len(urls) > 0:
-    # リストの先頭からURLを取り出す
-    current_url = urls.pop(0)
+while True:
+    # ページ番号をURLに追加
+    current_url = f"{url}?type=all&page={page}"
 
-    # すでにアクセスしたURLはスキップ
-    if current_url in visited:
-        continue
-
-    visited.append(current_url)
+    print(f"{page}ページ目を取得中")
 
     try:
-        # サーバーの負荷を避けるために0,5秒待機
-        time.sleep(0.3)
+        # サーバーの負荷を避けるために1秒待機
+        time.sleep(1)
 
+        # HTMLを取得
         response = requests.get(current_url, timeout=10)
 
         # HTTPエラーがあれば例外にする
@@ -57,49 +54,108 @@ while len(urls) > 0:
         # HTMLを解析する
         soup = BeautifulSoup(response.content, 'html.parser')
 
-        # ページタイトルを取得
-        title_tag = soup.find('title')
+        # リポジトリ名のリンクを取得
+        repo_links = soup.find_all(
+            'a',
+            attrs={'itemprop': 'name codeRepository'}
+        )
 
-        if title_tag is not None:
-            title = title_tag.get_text(strip=True)
-        else:
-            title = "No Title" 
+        # リポジトリがなければ終了
+        if not repo_links:
+            print("リポジトリが見つからなかったため終了")
+            break
 
-        # URLをキー、titleを値として辞書に保存
-        sitemap[current_url] = title
+        # 各リポジトリの情報を取得
+        for repo_link in repo_links:
 
-        # ページ内のリンクを取得
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            # 絶対URLに変換
-            absolute_url = urljoin(current_url, href)
+            # リポジトリ名を取得
+            repo_name = repo_link.get_text(strip=True)
 
-            # #以降を取り除く
-            absolute_url = absolute_url.split('#')[0]
+            # リポジトリ情報が入っている親要素
+            repo_box = repo_link.find_parent(
+                'div',
+                class_='Box-row'
+            )
 
-            # ドメインが同じか確認
-            if urlparse(absolute_url).netloc == domain:
+            if repo_box is None:
+                continue
 
-                # 未訪問で、リストにもないURLだけ追加
-                if absolute_url not in visited and absolute_url not in urls:
-                    urls.append(absolute_url)
+            # 主要な言語を取得
+            language_tag = repo_box.find(
+                'span',
+                attrs={'itemprop': 'programmingLanguage'}
+            )
+
+            if language_tag is not None:
+                language = language_tag.get_text(strip=True)
+            else:
+                language = "不明"
+
+            # スター数を取得
+            star_tag = repo_box.find(
+                'a',
+                href=re.compile(r'/stargazers/?$')
+            )
+
+            if star_tag is not None:
+                star_text = star_tag.get_text(strip=True)
+
+                try:
+                    stars = convert_stars(star_text)
+                except ValueError:
+                    stars = 0
+            else:
+                stars = 0
+
+            # データベースに保存
+            cursor.execute("""
+                INSERT INTO repositories (name, language, stars)
+                VALUES (?, ?, ?)
+                ON CONFLICT(name) DO UPDATE SET
+                    language = excluded.language,
+                    stars = excluded.stars
+            """, (repo_name, language, stars))
+
+            print(repo_name, language, stars)
+
+        # データベースに反映
+        conn.commit()
 
     except requests.exceptions.RequestException as e:
         print('アクセスできなかった:', current_url)
         print(e)
-        continue
+        break
 
     except ParserRejectedMarkup as e:
         print('HTMLを解析できなかった:', current_url)
         print(e)
-        continue
+        break
 
-# 辞書の内容をCSVファイルに書き込む
-with open('sitemap.csv', 'w', newline='', encoding='utf-8-sig') as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(['URL', 'Title'])  # ヘッダー行を書き込む
-    for url, title in sitemap.items():
-        writer.writerow([url, title])  # URLとタイトルを書き込む
+    # 次のページへ
+    page += 1
 
-print("サイトマップの作成が完了。sitemap.csvに保存")
-print ('取得したページ数:', len(sitemap))
+
+# 保存したデータをSELECT文で表示
+print("\n===== データベースの内容 =====")
+
+cursor.execute("""
+    SELECT name, language, stars
+    FROM repositories
+    ORDER BY stars DESC
+""")
+
+results = cursor.fetchall()
+
+for row in results:
+    print(
+        'リポジトリ名:', row[0],
+        '主要な言語:', row[1],
+        'スター数:', row[2]
+    )
+
+print('取得したリポジトリ数:', len(results))
+
+# データベースを閉じる
+conn.close()
+
+print("スクレイピングとデータベースへの保存が完了")
