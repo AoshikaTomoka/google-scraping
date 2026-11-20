@@ -133,6 +133,9 @@ while True:
 
     # 次のページへ
     page += 1
+    # 1ページ目だけ取得して終了
+    if page > 1:
+        break
 
 
 # 保存したデータをSELECT文で表示
