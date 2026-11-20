@@ -35,6 +35,7 @@ def convert_stars(star_text):
     else:
         return int(float(star_text))
 
+
 while True:
     # ページ番号をURLに追加
     current_url = f"{url}?type=all&page={page}"
@@ -57,8 +58,14 @@ while True:
         # リポジトリ名のリンクを取得
         repo_links = soup.find_all(
             'a',
-            attrs={'itemprop': 'name codeRepository'}
+            href=True
         )
+
+        repo_links = [
+            link for link in repo_links
+            if link['href'].startswith('/google/')
+            and link['href'].count('/') == 2
+        ]
 
         # リポジトリがなければ終了
         if not repo_links:
@@ -71,11 +78,8 @@ while True:
             # リポジトリ名を取得
             repo_name = repo_link.get_text(strip=True)
 
-            # リポジトリ情報が入っている親要素
-            repo_box = repo_link.find_parent(
-                'div',
-                class_='Box-row'
-            )
+            # リポジトリ情報が入っているli要素
+            repo_box = repo_link.find_parent('li')
 
             if repo_box is None:
                 continue
@@ -83,7 +87,7 @@ while True:
             # 主要な言語を取得
             language_tag = repo_box.find(
                 'span',
-                attrs={'itemprop': 'programmingLanguage'}
+                class_='PrimaryLanguageName__94OAQO'
             )
 
             if language_tag is not None:
@@ -133,10 +137,6 @@ while True:
 
     # 次のページへ
     page += 1
-    # 1ページ目だけ取得して終了
-    if page > 1:
-        break
-
 
 # 保存したデータをSELECT文で表示
 print("\n===== データベースの内容 =====")
