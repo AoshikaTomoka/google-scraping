@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS repositories (
 
 conn.commit()
 
-
+# スターの数を整数に変換する関数
 def convert_stars(star_text):
     star_text = star_text.strip().lower().replace(',', '')
 
